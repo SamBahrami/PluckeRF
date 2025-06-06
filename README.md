@@ -1,7 +1,5 @@
 # PlückeRF: A Line-based 3D Representation for Few-view Reconstruction
 
-**Sam Bahrami · Dylan Campbell**
-
 [![arXiv](https://img.shields.io/badge/arXiv-2506.03713-b31b1b.svg)](https://arxiv.org/abs/2506.03713)
 
 Code to be released.
