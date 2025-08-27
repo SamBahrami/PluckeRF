@@ -34,7 +34,7 @@ class OSGDecoder(nn.Module):
                  hidden_dim: int = 64, num_layers: int = 4, activation: nn.Module = nn.ReLU):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(3 * n_features, hidden_dim),
+            nn.Linear(n_features, hidden_dim),
             activation(),
             *itertools.chain(*[[
                 nn.Linear(hidden_dim, hidden_dim),
@@ -52,8 +52,8 @@ class OSGDecoder(nn.Module):
         # Aggregate features by mean
         # sampled_features = sampled_features.mean(1)
         # Aggregate features by concatenation
-        _N, n_planes, _M, _C = sampled_features.shape
-        sampled_features = sampled_features.permute(0, 2, 1, 3).reshape(_N, _M, n_planes*_C)
+        # _N, n_planes, _M, _C = sampled_features.shape
+        # sampled_features = sampled_features.permute(0, 2, 1, 3).reshape(_N, _M, n_planes*_C)
         x = sampled_features
 
         N, M, C = x.shape
@@ -66,6 +66,10 @@ class OSGDecoder(nn.Module):
 
         return {'rgb': rgb, 'sigma': sigma}
 
+def cam2world_to_world2cam_matrix(cam2world_matrix):
+    # cam2world_matrix: (N, 4, 4)
+    world2cam_matrix = torch.inverse(cam2world_matrix.float())
+    return world2cam_matrix
 
 class TriplaneSynthesizer(nn.Module):
     """
@@ -86,7 +90,7 @@ class TriplaneSynthesizer(nn.Module):
         'sampler_bbox_max': 1.,
     }
 
-    def __init__(self, triplane_dim: int, samples_per_ray: int):
+    def __init__(self, triplane_dim: int, samples_per_ray: int, model_type: str = 'camera_modulation'):
         super().__init__()
 
         # attributes
@@ -102,9 +106,10 @@ class TriplaneSynthesizer(nn.Module):
         self.ray_sampler = RaySampler()
 
         # modules
-        self.decoder = OSGDecoder(n_features=triplane_dim)
+        self.decoder = OSGDecoder(n_features=(triplane_dim))
+        
 
-    def forward(self, planes, cameras, anchors, resolutions, bg_colors, region_size: int):
+    def forward(self, planes, cameras, anchors, resolutions, bg_colors, region_size: int, dinov2_image_features=None):
         # planes: (N, 3, D', H', W')
         # cameras: (N, M, D_cam)
         # anchors: (N, M, 2)
@@ -130,10 +135,12 @@ class TriplaneSynthesizer(nn.Module):
         assert N*M == ray_origins.shape[0], "Batch size mismatch for ray_origins"
         assert ray_origins.dim() == 3, "ray_origins should be 3-dimensional"
 
-        # Perform volume rendering
+        camera_intrinsics = None
+        world2cam_extrinsics = None
+        image_features = None
         rgb_samples, depth_samples, weights_samples = self.renderer(
             planes.repeat_interleave(M, dim=0), self.decoder, ray_origins, ray_directions, self.rendering_kwargs,
-            bg_colors=bg_colors.reshape(-1, 1),
+            bg_colors=bg_colors.reshape(-1, 1), dinov2_image_features=image_features, camera_extrinsics=world2cam_extrinsics, camera_intrinsics=camera_intrinsics
         )
 
         # Reshape into 'raw' neural-rendered image

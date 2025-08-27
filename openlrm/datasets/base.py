@@ -48,15 +48,16 @@ class BaseDataset(torch.utils.data.Dataset, ABC):
         with open(meta_path, 'r') as f:
             uids = json.load(f)
         return uids
-
+    
     @staticmethod
     def _load_rgba_image(file_path, bg_color: float = 1.0):
-        ''' Load and blend RGBA image to RGB with certain background, 0-1 scaled '''
-        rgba = np.array(Image.open(smart_open(file_path, 'rb')))
-        rgba = torch.from_numpy(rgba).float() / 255.0
-        rgba = rgba.permute(2, 0, 1).unsqueeze(0)
-        rgb = rgba[:, :3, :, :] * rgba[:, 3:4, :, :] + bg_color * (1 - rgba[:, 3:, :, :])
-        rgba[:, :3, ...] * rgba[:, 3:, ...] + (1 - rgba[:, 3:, ...])
+        ''' Load and blend RGB image with certain background, 0-1 scaled '''
+        rgb = np.array(Image.open(smart_open(file_path, 'rb')))
+        #remove alpha channel if exists
+        if rgb.shape[2] == 4:
+            rgb = rgb[..., :3]
+        rgb = torch.from_numpy(rgb).float() / 255.0
+        rgb = rgb.permute(2, 0, 1).unsqueeze(0)
         return rgb
 
     @staticmethod

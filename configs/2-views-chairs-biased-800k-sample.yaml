@@ -1,0 +1,95 @@
+
+experiment:
+    type: lrm
+    seed: 42
+    parent: shapenet-chairs
+    child: 2-view-chairs-biased
+
+model:
+    camera_embed_dim: 512 # Does nothing, OpenLRM artifact
+    rendering_samples_per_ray: 96 # The number of samples per ray for NeRF volumetric rendering, affects memory usage
+    transformer_dim: 512 # The dimension of the transformer model
+    transformer_layers: 8 # Number of transformer layers
+    transformer_heads: 8 # Number of transformer heads
+    triplane_low_res: 32 # Half of the final resolution of each plane in our triplane representation
+    triplane_high_res: 64 # Does nothing
+    triplane_dim: 40 # The feature dimension of the triplane
+    encoder_type: dinov2
+    encoder_model_name: dinov2_vits14_reg
+    encoder_feat_dim: 384
+    encoder_freeze: false # Unfreezes encoder weights, trains a much stronger model
+    model_type: explicit # implicit (no_bias) | explicit (biased attention)
+
+dataset:
+    subsets:
+        -   name: shapenet
+            root_dirs:
+                - data/shapenetchairs # Replace with your path to the dataset
+            meta_path:
+                train: ./configs/chairs_train.json # Replace with your path to the train meta file
+                val: ./configs/chairs_val.json # Replace with your path to the val meta file
+            sample_rate: 1.0
+    sample_side_views: 3 # Number of side views to sample for each image for loss calculations, total number of views is 1 + sample_side_views per training image
+    source_image_res: 448 # The resolution of the source image, this is the image that the encoder sees, should be divisible by 14
+    render_image: # Parameters for the image renders the model should be rendering. It will resize images to sizes between low and high, and sample a region to recreate. Allows the model to try and learn more detailed representations by focusing on detailed areas.
+        low: 64
+        high: 224
+        region: 64
+    normalize_camera: true 
+    normed_dist_to_center: auto
+    num_train_workers: 4
+    num_val_workers: 2
+    pin_mem: true
+    n_conditioning_views: 2 # Integer, number of views to use as the conditioning signal for the transformer model
+
+train:
+    mixed_precision: bf16  # REPLACE THIS BASED ON GPU TYPE
+    find_unused_parameters: false
+    loss:
+        pixel_weight: 1.0
+        perceptual_weight: 0.01
+        tv_weight: 5e-4
+    optim:
+        lr: 4.0e-04
+        weight_decay: 0.05
+        beta1: 0.9
+        beta2: 0.95
+        clip_grad_norm: 1.0
+    scheduler:
+        type: cosine
+        warmup_real_iters: 2500
+    batch_size: 4 # Replace this per GPU batch size
+    accum_steps: 2 # Replace this with the number of gradient accumulation steps
+    epochs: 999999  # Don't touch this
+    training_iterations: 800000 # Replace with the number of training iterations you want to run
+    pluckerf_lpips_on_step: 650000 # Determines at what training step LPIPS loss is added to the training. 
+    debug_global_steps: null
+
+val:
+    batch_size: 4
+    global_step_period: 250 # Replace with your desired number of steps to log validation images and stats
+    debug_batches: null
+
+saver:
+    auto_resume: true
+    load_model: null
+    checkpoint_root: exps/checkpoints # Replace with your path to the checkpoints folder
+    checkpoint_global_steps: 1000
+    checkpoint_keep_level: 2
+
+logger:
+    stream_level: WARNING
+    log_level: INFO
+    log_root: exps/logs # Replace with your path to the logs folder
+    tracker_root: exps/trackers # Replace with your path to the trackers folder
+    enable_profiler: false
+    trackers:
+        - wandb
+    image_monitor:
+        train_global_steps: 200 # Replace with your desired number of steps to log training images
+        samples_per_log: 4 # Replace with your desired number of samples to log per step
+
+compile:
+    suppress_errors: true
+    print_specializations: true
+    disable: true

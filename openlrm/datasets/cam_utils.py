@@ -73,7 +73,7 @@ def camera_normalization_objaverse(normed_dist_to_center, poses: torch.Tensor, r
         [0, 0, -1, -dist_to_center],
         [0, 1, 0, 0],
         [0, 0, 0, 1],
-    ]], dtype=torch.float32)
+    ]], dtype=torch.float32).to(poses.device)
     pivotal_pose_inv = torch.inverse(pivotal_pose)
     camera_norm_matrix = torch.bmm(canonical_camera_extrinsics, pivotal_pose_inv)
 

@@ -286,10 +286,10 @@ class DinoVisionTransformer(nn.Module):
         x = self.prepare_tokens_with_masks(x, masks)
 
         if mod is None:
-            for blk in self.blocks:
+            for blk in self.blocks[:9]:
                 x = blk(x)
         else:
-            for blk in self.blocks:
+            for blk in self.blocks[:9]:
                 x = blk(x, mod)
 
         x_norm = self.norm(x)

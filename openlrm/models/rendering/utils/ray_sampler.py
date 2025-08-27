@@ -47,6 +47,7 @@ class RaySampler(torch.nn.Module):
         cy = intrinsics[:, 1, 2]
         sk = intrinsics[:, 0, 1]
 
+        # Defines pixel coordinates
         uv = torch.stack(torch.meshgrid(
             torch.arange(region_size, dtype=torch.float32, device=cam2world_matrix.device),
             torch.arange(region_size, dtype=torch.float32, device=cam2world_matrix.device),
@@ -60,6 +61,7 @@ class RaySampler(torch.nn.Module):
         y_cam = (uv[:, :, 1].view(N, -1) + anchors[:, 0].unsqueeze(-1)) * (1./resolutions) + (0.5/resolutions)
         z_cam = torch.ones((N, M), device=cam2world_matrix.device)
 
+        # Convert pixel coordinates to camera coordinates
         x_lift = (x_cam - cx.unsqueeze(-1) + cy.unsqueeze(-1)*sk.unsqueeze(-1)/fy.unsqueeze(-1) - sk.unsqueeze(-1)*y_cam/fy.unsqueeze(-1)) / fx.unsqueeze(-1) * z_cam
         y_lift = (y_cam - cy.unsqueeze(-1)) / fy.unsqueeze(-1) * z_cam
 

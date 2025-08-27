@@ -17,6 +17,7 @@ The renderer is a module that takes in rays, decides where to sample along each
 ray, and computes pixel colors using the volume rendering equation.
 """
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -107,7 +108,8 @@ class ImportanceRenderer(torch.nn.Module):
         return activation_factory
 
     def _forward_pass(self, depths: torch.Tensor, ray_directions: torch.Tensor, ray_origins: torch.Tensor,
-                        planes: torch.Tensor, decoder: nn.Module, rendering_options: dict):
+                        planes: torch.Tensor, decoder: nn.Module, rendering_options: dict, 
+                        dinov2_image_features: torch.Tensor, camera_extrinsics: torch.Tensor, camera_intrinsics: torch.Tensor):
         """
         Additional filtering is applied to filter out-of-box samples.
         Modifications made by Zexin He.
@@ -128,7 +130,7 @@ class ImportanceRenderer(torch.nn.Module):
         mask_inbox = mask_inbox.all(-1)
 
         # forward model according to all samples
-        _out = self.run_model(planes, decoder, sample_coordinates, sample_directions, rendering_options)
+        _out = self.run_model(planes, decoder, sample_coordinates, sample_directions, rendering_options, dinov2_image_features, camera_extrinsics, camera_intrinsics)
 
         # set out-of-box samples to zeros(rgb) & -inf(sigma)
         SAFE_GUARD = 8
@@ -143,7 +145,7 @@ class ImportanceRenderer(torch.nn.Module):
 
         return colors_pass, densities_pass
 
-    def forward(self, planes, decoder, ray_origins, ray_directions, rendering_options, bg_colors=None):
+    def forward(self, planes, decoder, ray_origins, ray_directions, rendering_options, bg_colors=None, dinov2_image_features=None, camera_extrinsics=None, camera_intrinsics=None):
         # self.plane_axes = self.plane_axes.to(ray_origins.device)
 
         if rendering_options['ray_start'] == rendering_options['ray_end'] == 'auto':
@@ -160,7 +162,8 @@ class ImportanceRenderer(torch.nn.Module):
         # Coarse Pass
         colors_coarse, densities_coarse = self._forward_pass(
             depths=depths_coarse, ray_directions=ray_directions, ray_origins=ray_origins,
-            planes=planes, decoder=decoder, rendering_options=rendering_options)
+            planes=planes, decoder=decoder, rendering_options=rendering_options,
+            dinov2_image_features=dinov2_image_features, camera_extrinsics=camera_extrinsics, camera_intrinsics=camera_intrinsics)
 
         # Fine Pass
         N_importance = rendering_options['depth_resolution_importance']
@@ -171,7 +174,8 @@ class ImportanceRenderer(torch.nn.Module):
 
             colors_fine, densities_fine = self._forward_pass(
                 depths=depths_fine, ray_directions=ray_directions, ray_origins=ray_origins,
-                planes=planes, decoder=decoder, rendering_options=rendering_options)
+                planes=planes, decoder=decoder, rendering_options=rendering_options,
+                dinov2_image_features=dinov2_image_features, camera_extrinsics=camera_extrinsics, camera_intrinsics=camera_intrinsics)
 
             all_depths, all_colors, all_densities = self.unify_samples(depths_coarse, colors_coarse, densities_coarse,
                                                                   depths_fine, colors_fine, densities_fine)
@@ -183,11 +187,17 @@ class ImportanceRenderer(torch.nn.Module):
 
         return rgb_final, depth_final, weights.sum(2)
 
-    def run_model(self, planes, decoder, sample_coordinates, sample_directions, options):
+    def run_model(self, planes, decoder, sample_coordinates, sample_directions, options, dinov2_image_features, camera_extrinsics, camera_intrinsics):
         plane_axes = self.plane_axes.to(planes.device)
         sampled_features = sample_from_planes(plane_axes, planes, sample_coordinates, padding_mode='zeros', box_warp=options['box_warp'])
+        N, n_planes, points, channels = sampled_features.shape
 
-        out = decoder(sampled_features, sample_directions)
+        if dinov2_image_features is not None:
+            image_features = self.get_dinov2_image_features_from_points(dinov2_image_features, sample_coordinates, camera_extrinsics, camera_intrinsics)
+        sampled_features = sampled_features.sum(dim=1)
+        if dinov2_image_features is not None:
+            sampled_features = torch.cat([sampled_features, image_features], dim=-1)
+        out = decoder(sampled_features, sample_directions) # TODO: Add the Dinov2 features 
         if options.get('density_noise', 0) > 0:
             out['sigma'] += torch.randn_like(out['sigma']) * options['density_noise']
         return out

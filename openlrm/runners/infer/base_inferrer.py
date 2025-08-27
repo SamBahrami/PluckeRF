@@ -49,11 +49,7 @@ class Inferrer(Runner):
     @abstractmethod
     def _build_model(self, cfg):
         pass
-
-    @abstractmethod
-    def infer_single(self, *args, **kwargs):
-        pass
-
+    
     @abstractmethod
     def infer(self):
         pass

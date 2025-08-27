@@ -39,11 +39,19 @@ class DinoWrapper(nn.Module):
     def forward(self, image):
         # image: [N, C, H, W], on cpu
         # RGB image with [0,1] scale and properly sized
-        inputs = self.processor(images=image, return_tensors="pt", do_rescale=False, do_resize=False).to(self.model.device)
-        # This resampling of positional embedding uses bicubic interpolation
-        outputs = self.forward_model(inputs)
-        last_hidden_states = outputs.last_hidden_state
-        return last_hidden_states
+        _, channels, _, _ = image.shape
+        number_of_images = channels // 3
+        for i in range(number_of_images):
+            current_image = image[:, 3*i:3*(i+1), :, :]
+            inputs = self.processor(images=current_image, return_tensors="pt", do_rescale=False, do_resize=False).to(self.model.device)
+            # This resampling of positional embedding uses bicubic interpolation
+            outputs = self.forward_model(inputs)
+            last_hidden_states = outputs.last_hidden_state
+            if i == 0:
+                all_last_hidden_states = last_hidden_states
+            else:
+                all_last_hidden_states = torch.cat([all_last_hidden_states, last_hidden_states], dim=1)
+        return all_last_hidden_states
 
     def _freeze(self):
         logger.warning(f"======== Freezing DinoWrapper ========")

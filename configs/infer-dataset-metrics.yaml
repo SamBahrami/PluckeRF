@@ -1,0 +1,12 @@
+# Minimal inference configuration for dataset evaluation
+source_size: 448  # Resolution for input images to the model
+render_size: 128  # Resolution for rendered output images
+
+dataset:
+    subsets:
+        -   root_dirs:
+                - /mnt/2tb/Crucial1TB-backup/data/srnchairs/srn_chairs/chairs_test
+            meta_path:
+                val: ./configs/chairs_test.json
+    normalize_camera: true
+    normed_dist_to_center: auto

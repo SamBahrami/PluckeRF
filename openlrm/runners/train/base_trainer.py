@@ -100,7 +100,8 @@ class Trainer(Runner):
 
     def __enter__(self):
         self.accelerator.init_trackers(
-            project_name=f"{self.cfg.experiment.parent}/{self.cfg.experiment.child}",
+            project_name=f"{self.cfg.experiment.parent}",
+            # init_kwargs={"wandb": {"name": self.cfg.experiment.child}},
         )
         self.prepare_everything()
         self.log_inital_info()
@@ -154,10 +155,30 @@ class Trainer(Runner):
                     self.model, self.optimizer, self.train_loader,
                 )
         self.accelerator.register_for_checkpointing(self.scheduler)
+        
+        # Create a simple state object to hold global_step for checkpointing
+        class TrainingState:
+            def __init__(self):
+                self.global_step = 0
+                
+            def state_dict(self):
+                return {'global_step': self.global_step}
+                
+            def load_state_dict(self, state_dict):
+                self.global_step = state_dict.get('global_step', 0)
+                
+        self.training_state = TrainingState()
+        self.training_state.global_step = self.global_step  # Sync initial state
+        self.accelerator.register_for_checkpointing(self.training_state)
+        
         # prepare stats
         N_total_batch_size = self.cfg.train.batch_size * self.accelerator.num_processes * self.cfg.train.accum_steps
         self.N_global_steps_per_epoch = math.ceil(len(self.train_loader) / self.cfg.train.accum_steps)
-        self.N_max_global_steps = self.N_global_steps_per_epoch * self.cfg.train.epochs
+        if 'training_iterations' in self.cfg.train:
+            if self.cfg.train.training_iterations is not None:
+                self.N_max_global_steps = self.cfg.train.training_iterations
+        else:
+            self.N_max_global_steps = self.N_global_steps_per_epoch * self.cfg.train.epochs
         if self.cfg.train.debug_global_steps is not None:
             logger.warning(f"Overriding max global steps from {self.N_max_global_steps} to {self.cfg.train.debug_global_steps}")
             self.N_max_global_steps = self.cfg.train.debug_global_steps
@@ -198,9 +219,36 @@ class Trainer(Runner):
         latest_ckpt = ckpt_dirs[-1]
         latest_ckpt_dir = os.path.join(ckpt_root, latest_ckpt)
         logger.info(f"======== Auto-resume from {latest_ckpt_dir} ========")
-        self.accelerator.load_state(latest_ckpt_dir)
-        self.global_step = int(latest_ckpt)
+        
+        # Extract step from directory name for backward compatibility
+        step = int(latest_ckpt)
+        
+        # Set accelerator step before loading to avoid KeyError
+        self.accelerator.step = step
+        
+        try:
+            self.accelerator.load_state(latest_ckpt_dir)
+        except KeyError as e:
+            if 'step' in str(e):
+                logger.warning(f"Old checkpoint format detected, manually setting step to {step}")
+                # For old checkpoints, we'll just continue with the manually set step
+                pass
+            else:
+                raise e
+        
+        # Handle backward compatibility: old checkpoints don't have training_state
+        if self.training_state.global_step > 0:
+            # New checkpoint with training_state - use it if it's valid
+            self.global_step = self.training_state.global_step
+            logger.info(f"======== Loaded global_step from training_state: {self.global_step} ========")
+        else:
+            # Old checkpoint without training_state - use the step we extracted from directory
+            self.global_step = step
+            self.training_state.global_step = step  # Sync the training state
+            logger.info(f"======== Inferred global_step from checkpoint directory: {self.global_step} ========")
+        
         self.current_epoch = self.global_step // self.N_global_steps_per_epoch
+        logger.info(f"======== Resumed at global step {self.global_step}, epoch {self.current_epoch} ========")
         return True
 
     def load_model_(self, cfg):
@@ -228,31 +276,17 @@ class Trainer(Runner):
 
     @control('on_main_process', synchronized=True)
     def save_checkpoint(self):
-        ckpt_dir = os.path.join(
-            self.cfg.saver.checkpoint_root,
-            self.cfg.experiment.parent, self.cfg.experiment.child,
-            f"{self.global_step:06d}",
-        )
-        self.accelerator.save_state(output_dir=ckpt_dir, safe_serialization=True)
-        logger.info(f"======== Saved checkpoint at global step {self.global_step} ========")
-        # manage stratified checkpoints
-        ckpt_dirs = os.listdir(os.path.dirname(ckpt_dir))
-        ckpt_dirs.sort()
-        max_ckpt = int(ckpt_dirs[-1])
-        ckpt_base = int(self.cfg.saver.checkpoint_keep_level)
-        ckpt_period = self.cfg.saver.checkpoint_global_steps
-        logger.debug(f"Checkpoint base: {ckpt_base}")
-        logger.debug(f"Checkpoint period: {ckpt_period}")
-        cur_order = ckpt_base ** math.floor(math.log(max_ckpt // ckpt_period, ckpt_base))
-        cur_idx = 0
-        while cur_order > 0:
-            cur_digit = max_ckpt // ckpt_period // cur_order % ckpt_base
-            while cur_idx < len(ckpt_dirs) and int(ckpt_dirs[cur_idx]) // ckpt_period // cur_order % ckpt_base < cur_digit:
-                if int(ckpt_dirs[cur_idx]) // ckpt_period % cur_order != 0:
-                    shutil.rmtree(os.path.join(os.path.dirname(ckpt_dir), ckpt_dirs[cur_idx]))
-                    logger.info(f"Removed checkpoint {ckpt_dirs[cur_idx]}")
-                cur_idx += 1
-            cur_order //= ckpt_base
+        save_points = [1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 384000, 512000]
+        if self.global_step % 10000 == 0 or self.global_step in save_points or self.global_step == self.cfg.train.training_iterations:
+            # Sync training state before saving
+            self.training_state.global_step = self.global_step
+            ckpt_dir = os.path.join(
+                self.cfg.saver.checkpoint_root,
+                self.cfg.experiment.parent, self.cfg.experiment.child,
+                f"{self.global_step:06d}",
+            )
+            self.accelerator.save_state(output_dir=ckpt_dir, safe_serialization=True)
+            logger.info(f"======== Saved checkpoint at global step {self.global_step} ========")
 
     @property
     def global_step_in_epoch(self):
@@ -286,11 +320,10 @@ class Trainer(Runner):
     def evaluate(self):
         pass
 
-    @staticmethod
-    def _get_str_progress(epoch: int = None, step: int = None):
+    def _get_str_progress(self, epoch: int = None, step: int = None):
         if epoch is not None:
             log_type = 'epoch'
-            log_progress = epoch
+            log_progress = epoch * self.N_global_steps_per_epoch
         elif step is not None:
             log_type = 'step'
             log_progress = step
@@ -304,6 +337,15 @@ class Trainer(Runner):
         split = f'/{split}' if split else ''
         for key, value in scalar_kwargs.items():
             self.accelerator.log({f'{key}{split}/{log_type}': value}, log_progress)
+
+    @control('on_main_process')
+    def log_gamma_scalars(self, epoch: int = None, step: int = None, split: str = None, **gamma_kwargs):
+        log_type, log_progress = self._get_str_progress(epoch, step)
+        split = f'/{split}' if split else ''
+        for key, value in gamma_kwargs.items():
+            # get last part of key, reverse split from _
+            group_id = key.split('_', 1)[-1]
+            self.accelerator.log({f'gamma/{group_id}': value}, log_progress)
 
     @control('on_main_process')
     def log_images(self, values: dict, step: int | None = None, log_kwargs: dict | None = {}):

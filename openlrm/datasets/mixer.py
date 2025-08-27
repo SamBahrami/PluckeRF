@@ -44,9 +44,12 @@ class MixerDataset(torch.utils.data.Dataset):
         if name == "objaverse":
             from .objaverse import ObjaverseDataset
             dataset_cls = ObjaverseDataset
-        # elif name == 'mvimgnet':
-        #     from .mvimgnet import MVImgNetDataset
-        #     dataset_cls = MVImgNetDataset
+        elif name == 'shapenet':
+            from .shapenet import ShapenetDataset
+            dataset_cls = ShapenetDataset
+        elif name == 'metrics_shapenet':
+            from .metrics_shapenet import MetricsShapenetDataset
+            dataset_cls = MetricsShapenetDataset
         else:
             raise NotImplementedError(f"Dataset {name} not implemented")
 

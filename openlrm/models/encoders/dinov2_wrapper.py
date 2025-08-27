@@ -33,7 +33,17 @@ class Dinov2Wrapper(nn.Module):
             if modulation_dim is not None:
                 raise ValueError("Modulated Dinov2 requires training, freezing is not allowed.")
             self._freeze()
+        else:
+            self.freeze_blocks_after(9)
 
+    def freeze_blocks_after(self, block_number: int = 9):
+        logger.warning(f"======== Freezing Dinov2Wrapper after block {block_number} ========")
+        for name, param in self.model.named_parameters():
+            # Extract the block number from the parameter name
+            if "blocks." in name:
+                block_num = int(name.split("blocks.")[1].split(".")[0])
+                if block_num >= block_number:
+                    param.requires_grad = False
     def _freeze(self):
         logger.warning(f"======== Freezing Dinov2Wrapper ========")
         self.model.eval()
@@ -54,14 +64,23 @@ class Dinov2Wrapper(nn.Module):
         # image: [N, C, H, W]
         # mod: [N, D] or None
         # RGB image with [0,1] scale and properly sized
-        if self.modulation_dim is None:
-            assert mod is None, "Unexpected modulation input in dinov2 forward."
-            outs = self.model(image, is_training=True)
-        else:
-            assert mod is not None, "Modulation input is required in modulated dinov2 forward."
-            outs = self.model(image, mod=mod, is_training=True)
-        ret = torch.cat([
-            outs["x_norm_clstoken"].unsqueeze(dim=1),
-            outs["x_norm_patchtokens"],
-        ], dim=1)
-        return ret
+        _, channels, _, _ = image.shape
+        number_of_images = channels // 3
+        for i in range(number_of_images):
+            current_image = image[:, 3*i:3*(i+1), :, :]
+            if self.modulation_dim is None:
+                assert mod is None, "Unexpected modulation input in dinov2 forward."
+                outs = self.model(current_image, is_training=True)
+            else:
+                assert mod is not None, "Modulation input is required in modulated dinov2 forward."
+                outs = self.model(current_image, mod=mod, is_training=True)
+            ret = torch.cat([
+                outs["x_norm_clstoken"].unsqueeze(dim=1),
+                outs["x_norm_patchtokens"],
+            ], dim=1)
+
+            if i == 0:
+                rets = ret
+            else:
+                rets = torch.cat([rets, ret], dim=1)
+        return rets
