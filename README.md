@@ -127,7 +127,7 @@ If you find this work useful for your research, please consider citing:
 ```bibtex
 @InProceedings{Bahrami_2025_CVPR,
     author    = {Bahrami, Sam and Campbell, Dylan},
-    title     = {Pl\"{u}cker: A Line-based 3D Representation for Few-view Reconstruction},
+    title     = {Pl\"{u}ckeRF: A Line-based 3D Representation for Few-view Reconstruction},
     booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) Workshops},
     month     = {June},
     year      = {2025},
