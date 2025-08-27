@@ -6,6 +6,9 @@
 
 **PlückeRF** is a novel line-based 3D representation for few-view reconstruction that more effectively harnesses multi-view information.
 
+![PlückeRF Overview](images/PluckeRF%20SplashimageGithub.png)
+
+
 ### Key Contributions
 
 - **PlückeRF Representation**: A structured, feature-augmented line-based 3D representation that connects pixel rays from input views
